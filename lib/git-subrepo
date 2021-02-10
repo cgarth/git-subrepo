@@ -856,7 +856,7 @@ subrepo:branch() {
   local filter=$branch
   [[ $first_gitrepo_commit ]] && filter=$first_gitrepo_commit..$branch
   FAIL=false RUN git filter-branch -f --prune-empty --tree-filter \
-    "rm -f .gitrepo" "$filter"
+    "find . -type f -name .gitrepo | xargs rm -vf" "$filter"
 
   git:create-worktree "$branch"
 
