@@ -30,7 +30,7 @@ fi
 bash+:import :std can version-check
 
 
-VERSION=0.4.3
+VERSION=0.4.3-ARC
 REQUIRED_BASH_VERSION=4.0
 REQUIRED_GIT_VERSION=2.7.0
 GIT_TMP=$(git rev-parse --git-common-dir 2> /dev/null || echo .git)/tmp
@@ -763,7 +763,7 @@ subrepo:branch() {
         is_direct_child=$(
           git show -s --pretty=format:"%P" "$commit" |
             grep "$ancestor"
-        ) || true
+        ) || true 
         o "is child: $is_direct_child"
         if [[ -z $is_direct_child ]]; then
           o "Ignore $commit, it's not in the selected path"
