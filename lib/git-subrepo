@@ -120,6 +120,7 @@ main() {
   local subrepo_commit=         # Upstream HEAD from previous clone/pull
   local subrepo_parent=         # Local commit from before previous clone/pull
   local subrepo_former=         # A retired gitrepo key that might still exist
+  local subrepo_subdir=         # Subdirectory within the subrepo to use
 
   local refs_subrepo_branch=    # A subrepo ref -> commit of branch/pull command
   local refs_subrepo_commit=    # A subrepo ref -> commit last merged
@@ -185,7 +186,7 @@ main() {
 
 # `git subrepo clone <url> [<subdir>]` command:
 command:clone() {
-  command-setup +subrepo_remote subdir:guess-subdir
+  command-setup +subrepo_remote subdir:guess-subdir subrepo_subdir:guess-subrepo-subdir
 
   # Clone (or reclone) the subrepo into the subdir:
   local reclone_up_to_date=false
@@ -702,6 +703,28 @@ subrepo:fetch() {
   git:make-ref "$refs_subrepo_fetch" FETCH_HEAD^0
 }
 
+  # replace the object at path
+subtree_replace() {
+    local tree=$1
+    local oid=$2
+    local path=$3
+
+    local base="${path%%/*}"
+
+    [[ -z ${base} ]] && echo ${oid} && return 0;
+
+    [[ "${path}" =~ '/' ]] && path="${path#*/}" || path=
+
+    git ls-tree ${tree} | \
+    while read m t o n; do 
+      if [[ "$n" == "${base}" ]]; then
+        o=$(subtree_replace "${o}" ${oid} "${path}")
+      fi
+      echo -e "$m $t $o\t$n"
+    done | \
+    git mktree
+}
+
 # Create a subrepo branch containing all changes
 # shellcheck disable=2120
 subrepo:branch() {
@@ -777,6 +800,11 @@ subrepo:branch() {
       fi
 
       o "Create a new commit ${first_parent[*]} ${second_parent[*]}"
+
+      local the_parent=
+      [[ ${first_parent[1]} ]] && the_parent=${first_parent[1]}
+      [[ ${second_parent[1]} ]] && the_parent=${second_parent[1]}
+
       FAIL=false RUN git cat-file -e "$commit":"$subdir"
       if OK; then
         o "Create with content"
@@ -785,6 +813,18 @@ subrepo:branch() {
         local author_info
         mapfile -t author_info < <(git log -1 --date=default --format=%ad%n%ae%n%an "$commit")
         IFS=$PREVIOUS_IFS
+
+        local new_tree=$(
+          subtree_replace \
+            $(git rev-parse "${the_parent}^{tree}") \
+            $(git rev-parse "$commit":"$subdir") \
+            "$subrepo_subdir"
+        )
+
+        o "original commit diff:"
+        git diff-tree -r ${commit}~1 ${commit}
+        o "translated commit diff:"
+        git diff-tree -r ${the_parent} ${new_tree}
 
         # When we create new commits we leave the author information unchanged
         # the committer will though be updated to the current user
@@ -795,7 +835,7 @@ subrepo:branch() {
           GIT_AUTHOR_DATE=${author_info[0]} \
           GIT_AUTHOR_EMAIL=${author_info[1]} \
           GIT_AUTHOR_NAME=${author_info[2]} \
-          git commit-tree -F - "${first_parent[@]}" "${second_parent[@]}" "$commit":"$subdir")
+          git commit-tree -F - "${first_parent[@]}" "${second_parent[@]}" "$new_tree")
       else
         o "Create empty placeholder"
         prev_commit=$(git commit-tree -m "EMPTY" \
@@ -839,13 +879,16 @@ subrepo:commit() {
     fi
   fi
 
+  o "Check that '$subrepo_commit_ref:$subrepo_subdir' is an existing directory."
+  OUT=true RUN git cat-file -t "$subrepo_commit_ref":"$subrepo_subdir"
+
   if git ls-files -- "$subdir" | grep -q .; then
     o "Remove old content of the subdir."
     RUN git rm -r -- "$subdir"
   fi
 
-  o "Put remote subrepo content into '$subdir/'."
-  RUN git read-tree --prefix="$subdir" -u "$subrepo_commit_ref"
+  o "Put remote subrepo content from '$subrepo_subdir:$subrepo_subdir' into '$subdir/'."
+  RUN git read-tree --prefix="$subdir" -u "$subrepo_commit_ref":"$subrepo_subdir"
 
   o "Put info into '$subdir/.gitrepo' file."
   update-gitrepo-file
@@ -1243,6 +1286,11 @@ guess-subdir() {
   encode-subdir
 }
 
+# Determine the correct subdir path to use:
+guess-subrepo-subdir() {
+  local dir=""
+}
+
 # Encode the subdir as a valid git ref format
 #
 # Input: env $subdir
@@ -1347,6 +1395,11 @@ read-gitrepo-file() {
     subrepo_branch=$output
   fi
 
+  if [[ -z $subrepo_subdir ]]; then
+    SAY=false OUT=true RUN git config --file="$gitrepo" subrepo.subdir
+    subrepo_subdir=$output
+  fi
+
   SAY=false OUT=true RUN git config --file="$gitrepo" subrepo.commit
   subrepo_commit=$output
 
@@ -1414,6 +1467,8 @@ update-gitrepo-file() {
       RUN git config --file="$gitrepo" subrepo.parent "$original_head_commit"
     fi
   fi
+
+  RUN git config --file="$gitrepo" subrepo.subdir "$subrepo_subdir"
 
   [[ -z $join_method ]] && join_method=merge
   RUN git config --file="$gitrepo" subrepo.method "$join_method"
@@ -1631,6 +1686,7 @@ subrepo:
   subdir:   "$subdir"
   merged:   "$merged"
 upstream:
+  subdir:   "$subrepo_subdir"
   origin:   "$subrepo_remote"
   branch:   "$subrepo_branch"
   commit:   "$commit"
