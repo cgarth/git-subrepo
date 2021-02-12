@@ -500,6 +500,10 @@ subrepo:clone() {
   o "Commit the new '$subdir/' content."
   subrepo_commit_ref=$upstream_head_commit
   CALL subrepo:commit
+
+   o "Pull LFS files $subrepo_remote and amend commit"
+   RUN git lfs pull "$subrepo_remote"
+   RUN git commit -a --amend --allow-empty --no-edit
 }
 
 # Init a new subrepo from current repo:
@@ -888,7 +892,7 @@ subrepo:commit() {
   fi
 
   o "Put remote subrepo content from '$subrepo_subdir:$subrepo_subdir' into '$subdir/'."
-  RUN git read-tree --prefix="$subdir" -u "$subrepo_commit_ref":"$subrepo_subdir"
+  GIT_LFS_SKIP_SMUDGE=1 RUN git read-tree --prefix="$subdir" -u "$subrepo_commit_ref":"$subrepo_subdir"
 
   o "Put info into '$subdir/.gitrepo' file."
   update-gitrepo-file
@@ -1860,7 +1864,7 @@ git:is_merge_commit() {
 git:create-worktree() {
   local branch=$1
   worktree=$GIT_TMP/$branch
-  RUN git worktree add "$worktree" "$branch"
+  GIT_LFS_SKIP_SMUDGE=1 RUN git worktree add "$worktree" "$branch"
 }
 
 git:remove-worktree() {
